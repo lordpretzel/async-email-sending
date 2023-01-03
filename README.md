@@ -7,7 +7,14 @@
 
 # async-email-sending
 
-Small library for adding and removing advice to functions.
+This package enables asynchronous sending of emails in Emacs using the new
+built-in sqlite support in Emacs 29. I am using the package with `mu4e`, but it
+should work with `gnus` and other packages that use `gnus` and `smtpmail` to
+send the emails.
+
+## Usage
+
+To activate set `async-email-sending-use-async-send-mail` using customize (e.g., `use-package`). Do not use `setq` as this will not call the set function associated with `async-email-sending-use-async-send-mail` that overrides functions for sending email. You can call command `async-email-sending-queued-mail-show-bui` to show a list of outstanding emails (queued emails or emails we tried to send, but failed so far).
 
 ## Installation
 
@@ -30,11 +37,11 @@ Using [use-package](https://github.com/jwiegley/use-package) with [quelpa](https
 
 ~~~elisp
 (use-package
-:quelpa ((async-email-sending
-:fetcher github
-:repo "lordpretzel/async-email-sending")
-:upgrade t)
-)
+  :quelpa ((async-email-sending
+            :fetcher github
+            :repo "lordpretzel/async-email-sending")
+           :upgrade t)
+   :custom (async-email-sending-use-async-send-mail t))
 ~~~
 
 ### straight
@@ -43,7 +50,8 @@ Using [use-package](https://github.com/jwiegley/use-package) with [straight.el](
 
 ~~~elisp
 (use-package async-email-sending
-:straight (async-email-sending :type git :host github :repo "lordpretzel/async-email-sending")
+  :straight (async-email-sending :type git :host github :repo "lordpretzel/async-email-sending")
+  :custom (async-email-sending-use-async-send-mail t))
 ~~~
 
 ### Source
