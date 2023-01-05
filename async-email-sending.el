@@ -239,7 +239,7 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
                         (error "Cannot send email async if Emacs is not build\
  with support for sqlite"))
                       (unless (sqlitep db)
-                        (error "Cannot open sqlitedb storing emails: %s" 
+                        (error "Cannot open sqlitedb storing emails: %s"
                                ,(async-email-sending--get-send-mail-db)))
                       (sqlite-execute db "DELETE FROM emails WHERE hash = ?;" (list ,hash)))
                     nil)
@@ -249,9 +249,9 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
                      (error "Cannot send email async if Emacs is\
  not build with support for sqlite"))
                    (unless (sqlitep db)
-                     (error "Cannot open sqlitedb storing emails: %s" 
+                     (error "Cannot open sqlitedb storing emails: %s"
                             ,(async-email-sending--get-send-mail-db)))
-                   (sqlite-execute db "UPDATE emails SET error = ? WHERE hash = ?;" 
+                   (sqlite-execute db "UPDATE emails SET error = ? WHERE hash = ?;"
                                    (list  (error-message-string e) ,hash)))))))
          ;; determine success and
          (lambda (&optional msg)
@@ -281,7 +281,7 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
   (-map #'async-email-sending--queued-mail-entry
         (async-email-sending--get-queued-emails)))
 
-(defun async-email-sending--bui-queued-mail-entries 
+(defun async-email-sending--bui-queued-mail-entries
     (&optional search-type &rest search-values)
   "Search for queued emails with SEARCH-TYPE being one of SEARCH-VALUES."
   (cl-case search-type
@@ -301,9 +301,9 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
 
 (defun async-email-sending--bui-describe (&rest emails)
   "Display infos for EMAILS."
-  (bui-get-display-entries 
-   'async-email-sending-queued-mail-bui-entries 
-   'info 
+  (bui-get-display-entries
+   'async-email-sending-queued-mail-bui-entries
+   'info
    (cons 'id emails)))
 
 ;; main tabulated list interface
