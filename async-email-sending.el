@@ -47,6 +47,7 @@
 ;; IMPORTS
 (require 'async)
 (require 'bui)
+(require 'auth-source)
 (require 'smtpmail)
 (require 'message)
 (require 'dash)
@@ -105,9 +106,9 @@ Sets KEY to VALUE. This function also installs advice and sets
 
 This uses the async package, but to avoid loosing mail when
 sending fails, mail information is stored in an SQLite database."
-  :group 'mu4e-pimped
+  :group 'async-email-sending
   :set #'async-email-sending--set-mail-async
-  :require 'mu4e-pimped
+  :require 'async-email-sending
   :type 'boolean)
 
 ;; ********************************************************************************
@@ -185,7 +186,9 @@ to be send but did not end up being send and try to send them."
 
 (defun async-email-sending--email-to-string (e)
   "Create a human friendly text representations of email E."
-  (let ((email (async-email-sending--queued-mail-entry e)))
+  (let ((email (if (consp (car e))
+                   e
+                 (async-email-sending--queued-mail-entry e))))
     (concat
      "to: " (alist-get 'to email)
      " from: " (alist-get 'from email)
@@ -215,6 +218,12 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
            (smtpmail-queue-mail nil))
       ;; only try sending if we have not queued
       (when dosend
+        ;; query for smpt-server if it is not set already
+        (unless smtpmail-smtp-server
+          (smtpmail-query-smtp-server))
+        ;; try to access smtp server credential via auth-source to ensure that
+        ;; we are not getting asked for auth password during async call
+        (auth-source-search :host smtpmail-smtp-server)
         ;; start other emacs that does the sending
         (async-start
          ;; async lambda to send email and
@@ -242,6 +251,8 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
                         (error "Cannot open sqlitedb storing emails: %s"
                                ,(async-email-sending--get-send-mail-db)))
                       (sqlite-execute db "DELETE FROM emails WHERE hash = ?;" (list ,hash)))
+                    ;; return nil on success, but sleep to make sure email is deleted before we return
+                    (sleep-for 0 500)
                     nil)
                 ('error
                  (let ((db (sqlite-open ,(async-email-sending--get-send-mail-db))))
@@ -251,6 +262,9 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
                    (unless (sqlitep db)
                      (error "Cannot open sqlitedb storing emails: %s"
                             ,(async-email-sending--get-send-mail-db)))
+                   (with-temp-buffer
+                     (insert (format "error %s\n\n" (error-message-string e)))
+                     (append-to-file (point-min) (point-max) "~/emailoutput"))
                    (sqlite-execute db "UPDATE emails SET error = ? WHERE hash = ?;"
                                    (list  (error-message-string e) ,hash)))))))
          ;; determine success and
@@ -261,6 +275,7 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
                         msg)
              (message "Delivering message to %s...done" to))
            (async-email-sending-redraw-mu4e-main-if-need-be)))))))
+
 
 ;; bui list of unsend email
 (defun async-email-sending--queued-mail-entry (e)
@@ -273,6 +288,7 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
         (to . ,(message-field-value "To"))
         (subject . ,(message-field-value "Subject"))
         (content . ,(buffer-substring (message-goto-body) (point-max)))
+        (fullcontent . ,content)
         (date . ,(message-field-value "Date"))
         (emsg . ,error)))))
 
@@ -295,6 +311,13 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
   (ignore entry)
   (insert content))
 
+;; delete an email
+(defun async-email-sending--delete-email (hash)
+  "Delete email with HASH of its content from sqlite db."
+  (async-email-sending--with-send-db
+   (sqlite-execute db "DELETE FROM emails WHERE hash = ?;"
+                   (list hash))))
+
 ;; define entry types
 (bui-define-entry-type async-email-sending-queued-mail-bui-entries
   :get-entries-function #'async-email-sending--bui-queued-mail-entries)
@@ -306,16 +329,24 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
    'info
    (cons 'id emails)))
 
+(defun async-email-sending--bui-error-transform (emsg &optional _)
+  "Tranform error message EMSG for presentation."
+  (bui-get-non-nil emsg
+    (list (truncate-string-to-width
+           (replace-regexp-in-string "[\n]" " " emsg) 50)
+          'face 'error)))
+
 ;; main tabulated list interface
 (bui-define-interface async-email-sending-queued-mail-bui-entries list
   :buffer-name "*Pending emails*"
   :describe-function #'async-email-sending--bui-describe
-  :format '((from nil 40)
-            (to nil 40)
-            (date nil 40)
-            (subject nil 150 t)
-            (emsg nil 20 t))
+  :format '((from nil 30 t)
+            (to nil 30 t)
+            (date nil 30 t)
+            (subject nil 50 t)
+            (emsg async-email-sending--bui-error-transform 50 t))
   :sort-key '(date from to))
+
 
 ;; detailed info list
 (bui-define-interface async-email-sending-queued-mail-bui-entries info
@@ -323,8 +354,42 @@ sending the email even if `smtpmail-queue-mail' is non-nil."
             (to format (format))
             (subject format (format))
             (date format (format))
+            (emsg format (format error))
             nil
             (content nil async-email-sending--bui-info-content)))
+
+;; get current marked entries
+(defun async-email-sending--get-marked-bui-entries ()
+  "Get all emails currently marked in bui."
+  (--map (bui-entry-by-id (bui-current-entries) it)
+        (or (bui-list-get-marked-id-list)
+            (list (bui-list-current-id)))))
+
+;; delete emails selected in bui
+(defun async-email-sending-bui-delete-emails ()
+  "Delete emails selected in bui list."
+  (interactive)
+  (dolist (email (async-email-sending--get-marked-bui-entries))
+    (async-email-sending--delete-email
+          (alist-get 'id email)))
+  (revert-buffer nil t))
+
+;; try to resend selected emails
+(defun async-email-sending-bui-try-send-email ()
+  "Try to resend emails selected in bui list."
+  (interactive)
+  (dolist (e (async-email-sending--get-marked-bui-entries))
+    (let ((content (alist-get 'fullcontent e)))
+      (message "trying to flush %s" (async-email-sending--email-to-string e))
+      (with-temp-buffer
+        (insert content)
+        (async-email-sending--send-a-mail-async (current-buffer) t)))))
+
+;; add to keymap for bui interface
+(define-key async-email-sending-queued-mail-bui-entries-list-mode-map (kbd "d")
+  'async-email-sending-bui-delete-emails)
+(define-key async-email-sending-queued-mail-bui-entries-list-mode-map (kbd "e")
+  'async-email-sending-bui-try-send-email)
 
 ;;;###autoload
 (defun async-email-sending-queued-mail-show-bui ()
